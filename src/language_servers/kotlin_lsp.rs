@@ -67,12 +67,77 @@ fn get_version() -> Result<String> {
 
 fn download_from_teamcity(version: String) -> Result<String> {
     let (os, arch) = zed_extension_api::current_platform();
+    let target_dir = format!("kotlin-lsp-{version}");
+
+    // Try the new URL format first (introduced in version 262.4739.0+)
+    let (new_url, new_file_type, new_binary_path) = match (os, arch) {
+        (zed::Os::Linux, zed::Architecture::X8664) => (
+            format!(
+                "https://download-cdn.jetbrains.com/kotlin-lsp/{version}/kotlin-server-{version}.tar.gz"
+            ),
+            zed_extension_api::DownloadedFileType::GzipTar,
+            format!("{target_dir}/kotlin-server-{version}/bin/intellij-server"),
+        ),
+        (zed::Os::Linux, zed::Architecture::Aarch64) => (
+            format!(
+                "https://download-cdn.jetbrains.com/kotlin-lsp/{version}/kotlin-server-{version}-aarch64.tar.gz"
+            ),
+            zed_extension_api::DownloadedFileType::GzipTar,
+            format!("{target_dir}/kotlin-server-{version}/bin/intellij-server"),
+        ),
+        (zed::Os::Mac, zed::Architecture::X8664) => (
+            format!(
+                "https://download-cdn.jetbrains.com/kotlin-lsp/{version}/kotlin-server-{version}.sit"
+            ),
+            zed_extension_api::DownloadedFileType::Zip,
+            format!("{target_dir}/kotlin-server-{version}/bin/intellij-server"),
+        ),
+        (zed::Os::Mac, zed::Architecture::Aarch64) => (
+            format!(
+                "https://download-cdn.jetbrains.com/kotlin-lsp/{version}/kotlin-server-{version}-aarch64.sit"
+            ),
+            zed_extension_api::DownloadedFileType::Zip,
+            format!("{target_dir}/kotlin-server-{version}/bin/intellij-server"),
+        ),
+        (zed::Os::Windows, zed::Architecture::X8664) => (
+            format!(
+                "https://download-cdn.jetbrains.com/kotlin-lsp/{version}/kotlin-server-{version}.win.zip"
+            ),
+            zed_extension_api::DownloadedFileType::Zip,
+            format!("{target_dir}/bin/intellij-server.exe"),
+        ),
+        (zed::Os::Windows, zed::Architecture::Aarch64) => (
+            format!(
+                "https://download-cdn.jetbrains.com/kotlin-lsp/{version}/kotlin-server-{version}-aarch64.win.zip"
+            ),
+            zed_extension_api::DownloadedFileType::Zip,
+            format!("{target_dir}/bin/intellij-server.exe"),
+        ),
+        _ => {
+            return Err(
+                "Unsupported platform architecture for Kotlin language server.".to_string(),
+            )
+        }
+    };
+
+    if Path::new(&new_binary_path).exists() {
+        return Ok(new_binary_path);
+    }
+
+    if !Path::new(&target_dir).exists()
+        && zed::download_file(&new_url, &target_dir, new_file_type).is_ok()
+    {
+        make_file_executable(&new_binary_path)?;
+        return Ok(new_binary_path);
+    }
+
+    // Fall back to the old ZIP format
     let platform = match os {
         zed::Os::Mac => "mac",
         zed::Os::Linux => "linux",
         zed::Os::Windows => "win",
     };
-    let arch = match arch {
+    let arch_str = match arch {
         zed::Architecture::Aarch64 => "aarch64",
         zed::Architecture::X8664 => "x64",
         _ => {
@@ -80,24 +145,29 @@ fn download_from_teamcity(version: String) -> Result<String> {
         }
     };
 
-    let url =
-        format!("https://download-cdn.jetbrains.com/kotlin-lsp/{version}/kotlin-lsp-{version}-{platform}-{arch}.zip");
-    let target_dir = format!("kotlin-lsp-{version}");
-    let script_path = format!(
+    let old_url = format!(
+        "https://download-cdn.jetbrains.com/kotlin-lsp/{version}/kotlin-lsp-{version}-{platform}-{arch_str}.zip"
+    );
+    let old_script_path = format!(
         "{target_dir}/kotlin-lsp.{extension}",
         extension = match os {
             zed::Os::Mac | zed::Os::Linux => "sh",
             zed::Os::Windows => "cmd",
         }
     );
+
+    if Path::new(&old_script_path).exists() {
+        return Ok(old_script_path);
+    }
+
     if !Path::new(&target_dir).exists() {
         zed::download_file(
-            &url,
+            &old_url,
             &target_dir,
             zed_extension_api::DownloadedFileType::Zip,
         )?;
-        make_file_executable(&script_path)?;
+        make_file_executable(&old_script_path)?;
     }
 
-    Ok(script_path)
+    Ok(old_script_path)
 }
